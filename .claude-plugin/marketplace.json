@@ -1,0 +1,5 @@
+{
+  "name": "poste-pilotage",
+  "owner": { "name": "Gallisatyricon" },
+  "plugins": [{ "name": "poste-pilotage", "source": "./" }]
+}

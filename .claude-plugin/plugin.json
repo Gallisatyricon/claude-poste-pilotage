@@ -1,0 +1,7 @@
+{
+  "name": "poste-pilotage",
+  "version": "0.10.0",
+  "description": "Poste de pilotage : décisions à trancher, arbre des agents, message direct à un sous-agent et compteur permanent.",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
