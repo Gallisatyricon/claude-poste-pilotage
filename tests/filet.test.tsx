@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { findQuestions, textQuestion, toolLabel, turnQuestion } from '../hooks/register'
+import { findQuestions, isPersonPrompt, textQuestion, toolLabel, turnQuestion } from '../hooks/register'
 
 const PANE = {
   plugin: 'poste-pilotage',
@@ -141,4 +141,83 @@ test('les noms d’outils sont traduits en mots simples', async () => {
   expect(toolLabel('mcp__Claude_Browser__navigate')).toBe('navigateur')
   expect(toolLabel('mcp__recall__fetch_document')).toBe('fetch document')
   expect(toolLabel('OutilInconnu')).toBe('OutilInconnu')
+})
+
+test('tes messages sont reconnus, y compris sans étiquette, et les autres non', async () => {
+  for (const kind of ['composer', 'bridge', 'sdk', 'unclassified']) expect(isPersonPrompt(kind)).toBe(true)
+  for (const kind of ['task-notification', 'peer', 'plugin', 'scheduled-trigger']) expect(isPersonPrompt(kind)).toBe(false)
+  expect(isPersonPrompt('composer', true)).toBe(false)
+})
+
+test('les questions écrites d’un tour précédent laissent la place à celles du dernier tour', async ($, on) => {
+  const statuses: (string | undefined)[] = []
+  mock.clock(on, { now: 5_000_000 })
+  on('command.register', () => ({ value: { command: 'pilotage' } }))
+  on('ui.status', (_: unknown, e: { text: string | undefined }) => {
+    statuses.push(e.text)
+    return { value: undefined }
+  })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000 }, rateLimits: [] } }))
+  on('agent.list', () => ({ value: [] }))
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('turn.complete', () => ({ text: '' }))
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  on('ui.toast', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/', surface: 'vscode', isInteractive: true })
+  const finish = (turnId: string, answer: string) =>
+    $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId, reason: 'answer' } as any)
+
+  await finish('t1', 'Première version prête.\nOn part sur A ?')
+  expect(statuses.at(-1)).toBe('1 décision en attente')
+  // Un sous-agent finit : l'orchestrateur reprend sans que tu aies répondu, et pose autre chose.
+  await $.prompt.submit({ text: 'tâche finie', origin: { kind: 'task-notification' } } as any)
+  await finish('t2', 'Le sous-agent a fini.\nJe fusionne les deux branches ?')
+  expect(statuses.at(-1)).toBe('1 décision en attente')
+  // Un tour qui ne pose rien vide les questions écrites dépassées.
+  await finish('t3', 'Fusion faite, tout passe.')
+  expect(statuses.at(-1)).toBe('Aucune décision en attente')
+})
+
+test('« Ignorer » et « Vider » retirent les questions écrites sans rien envoyer', async ($, on) => {
+  const statuses: (string | undefined)[] = []
+  const prompts: string[] = []
+  mock.clock(on, { now: 5_000_000 })
+  on('command.register', () => ({ value: { command: 'pilotage' } }))
+  on('ui.status', (_: unknown, e: { text: string | undefined }) => {
+    statuses.push(e.text)
+    return { value: undefined }
+  })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000 }, rateLimits: [] } }))
+  on('agent.list', () => ({ value: [] }))
+  on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('turn.start', (_: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('prompt.submit', (_: unknown, e: { text: string }) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  const texts = ['On supprime le cache ?', 'On garde la v1 ?', 'On publie ?']
+  on('turn.step', async function* (_: unknown, e: { turnId: string; index: number }) {
+    return { turnId: e.turnId, index: e.index, answer: texts[e.index] ?? '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  await $.session.start({ cwd: '/', surface: 'vscode', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 'tz' })
+  for (let index = 0; index < 3; index++) {
+    const stream = $.turn.step({ turnId: 'tz', index, model: 'm', messageCount: 1 })
+    for await (const _chunk of stream) {
+      // lu jusqu'au bout
+    }
+    await stream.result
+  }
+  await $.turn.complete({ answer: texts[2], durationMs: 1, isAborted: false, turnId: 'tz', reason: 'answer' } as any)
+  expect(statuses.at(-1)).toBe('3 décisions en attente')
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  await ui.press({ key: 'i-texte-tz' })
+  expect(statuses.at(-1)).toBe('2 décisions en attente')
+  await ui.press({ key: 'clear-all' })
+  expect(statuses.at(-1)).toBe('Aucune décision en attente')
+  await ui.unmount()
+  expect(prompts.length).toBe(0)
 })

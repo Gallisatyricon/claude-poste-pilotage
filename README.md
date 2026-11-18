@@ -13,6 +13,7 @@ Quand un orchestrateur fait travailler plusieurs sous-agents, les questions qui 
   - Les questions écrites en texte libre en fin de tour, même suivies de quelques actions de clôture : repérées par une règle fixe (point d'interrogation, tournures comme « dis-moi », « tu valides »), sans appel à un modèle.
   - « Voir le détail » ouvre le passage où la question a été posée, ou les options d'une question à choix.
   - « Répondre » ouvre la fenêtre de question native (avec un champ libre multiligne). Avec plusieurs questions, les réponses attendent sur leur carte et partent ensemble, chacune accompagnée de sa question.
+  - Seules les questions écrites du dernier tour de l'orchestrateur restent affichées : celles d'avant sont considérées comme dépassées. « Ignorer » et « Vider les questions écrites » retirent à la main celles qui ne servent plus, sans rien envoyer.
 - **Agents** : l'orchestrateur et ses sous-agents en arbre, avec leur état, leur dernière action en mots simples, leur nombre d'actions et leurs tokens. « Écrire » envoie un message directement à un sous-agent, sans passer par l'orchestrateur.
 - **Ligne d'état permanente** : `2 décisions en attente · contexte 61 % · forfait 5 h : 40 %`.
 - **`/pilotage`** ouvre ou ferme le panneau.

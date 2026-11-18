@@ -318,7 +318,27 @@ export function turnQuestion(stepTexts: readonly string[], finalAnswer: string):
 // rechargement du mod : on retombe alors sur la réponse finale seule.
 const stepTexts = new Map<string, string[]>()
 
-const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
+// Les messages qui ne viennent pas de toi. Tout le reste est traité comme ton
+// message, y compris « unclassified », l'étiquette qu'un canal non attesté reçoit
+// (selon l'app, ce que tu tapes peut arriver ainsi).
+const NOT_PERSON_ORIGINS = new Set([
+  'task-notification',
+  'scheduled-trigger',
+  'peer',
+  'peer-send-message',
+  'coordinator',
+  'observer',
+  'observer-activity',
+  'auto-continuation',
+  'plugin',
+  'slack-ping',
+  'channel',
+  'projects-relay',
+])
+
+export function isPersonPrompt(kind: string, isMeta?: boolean): boolean {
+  return !isMeta && !NOT_PERSON_ORIGINS.has(kind)
+}
 
 function relayedFor(source: string | undefined): string | undefined {
   if (!source || !source.startsWith(SOURCE_PREFIX)) return undefined
@@ -462,6 +482,14 @@ async function sendAnswers($: Engine, items?: readonly Decision[]) {
   )
 }
 
+/** Retire une question écrite dépassée, ou toutes si aucun id n'est donné. Rien n'est envoyé. */
+async function dismiss($: Engine, id?: string) {
+  await update($, decisions, list =>
+    list.filter(d => d.kind !== 'texte' || (id !== undefined && d.id !== id)),
+  )
+  await syncStatus($)
+}
+
 async function togglePane($: Engine) {
   const isUp = (await $.ui.panes()).some(pane => pane.id === PANE)
   if (isUp) {
@@ -562,7 +590,7 @@ export const register: Register = on => {
   // Ton prochain message répond aux questions écrites en texte : elles sortent de la liste.
   on('prompt.submit', async ($, e, next) => {
     const submitted = await next(e)
-    if (PERSON_ORIGINS.has(e.origin.kind) && !e.isMeta) {
+    if (isPersonPrompt(e.origin.kind, e.isMeta)) {
       const list = await read($, decisions)
       if (list.some(d => d.kind === 'texte')) {
         await update($, decisions, all => all.filter(d => d.kind !== 'texte'))
@@ -637,7 +665,12 @@ export const register: Register = on => {
         }))
         .reverse()
       await update($, decisions, list => {
-        const kept = list.filter(d => d.kind === 'texte' && !fresh.some(f => f.question === d.question))
+        // Seules comptent les questions écrites du dernier tour : celles d'avant
+        // sont dépassées, l'orchestrateur est passé à autre chose. On ne garde
+        // que celles où tu as déjà noté une réponse, pour ne pas la perdre.
+        const kept = list.filter(
+          d => d.kind === 'texte' && d.answer && !fresh.some(f => f.question === d.question),
+        )
         return [...kept, ...fresh]
       })
       await patchAgent($, MAIN, row => ({
@@ -763,6 +796,11 @@ export const register: Register = on => {
                     {d.answer ? 'Modifier' : 'Répondre'}
                   </Button>
                 )}
+                {d.kind === 'texte' && (
+                  <Button key={`i-${d.id}`} onPress={() => void dismiss($, d.id)}>
+                    Ignorer
+                  </Button>
+                )}
               </Box>
               {d.answer && <Text dimColor>Ta réponse : {d.answer}</Text>}
               {d.kind !== 'texte' && (
@@ -778,6 +816,13 @@ export const register: Register = on => {
               {answeredCount < textCount && (
                 <Text dimColor>Les questions sans réponse seront signalées comme telles.</Text>
               )}
+            </Box>
+          )}
+          {textCount > 1 && (
+            <Box alignItems="flex-start">
+              <Button key="clear-all" onPress={() => void dismiss($)}>
+                Vider les questions écrites
+              </Button>
             </Box>
           )}
         </Box>
